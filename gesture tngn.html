@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hand Tracking dengan Gesture dan Suara</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1646424915/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1646424915/drawing_utils.js"></script>
+    <style>
+        #gestureText {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 24px;
+            color: red;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Hand Tracking dengan Gesture dan Suara</h1>
+    <p>Gunakan kamera untuk mendeteksi gerakan tangan. Suara beep dimainkan saat gerak, dan teks muncul berdasarkan gesture.</p>
+    <div id="gestureText"></div>
+    <video id="video" width="640" height="480" autoplay muted></video>
+    <canvas id="canvas" width="640" height="480"></canvas>
+    <audio id="sound" src="https://www.soundjay.com/misc/sounds/beep-07.wav" preload="auto"></audio>
+
+    <script>
+        const videoElement = document.getElementById('video');
+        const canvasElement = document.getElementById('canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const soundElement = document.getElementById('sound');
+        const gestureText = document.getElementById('gestureText');
+
+        let lastHandPosition = null; // Untuk menyimpan posisi tangan sebelumnya
+        let lastGesture = null; // Untuk menghindari teks berulang
+
+        // Fungsi untuk mendeteksi gesture berdasarkan landmark
+        function detectGesture(landmarks) {
+            // Landmark utama: 0 (pergelangan), 4 (jempol), 8 (telunjuk), 12 (tengah), 16 (manis), 20 (kelingking)
+            const wrist = landmarks[0];
+            const thumb = landmarks[4];
+            const index = landmarks[8];
+            const middle = landmarks[12];
+            const ring = landmarks[16];
+            const pinky = landmarks[20];
+
+            // Threshold untuk "terangkat" (di atas pergelangan)
+            const threshold = 0.1;
+
+            // Peace sign: Telunjuk dan tengah terangkat, yang lain tidak
+            if (index.y < wrist.y - threshold && middle.y < wrist.y - threshold &&
+                ring.y > wrist.y && pinky.y > wrist.y && thumb.y > wrist.y) {
+                return "Peace!";
+            }
+
+            // Open hand: Semua jari terangkat
+            if (thumb.y < wrist.y - threshold && index.y < wrist.y - threshold &&
+                middle.y < wrist.y - threshold && ring.y < wrist.y - threshold &&
+                pinky.y < wrist.y - threshold) {
+                return "Hallo!";
+            }
+
+            // Thumbs up: Jempol terangkat, yang lain tidak
+            if (thumb.y < wrist.y - threshold && index.y > wrist.y &&
+                middle.y > wrist.y && ring.y > wrist.y && pinky.y > wrist.y) {
+                return "Thumbs Up!";
+            }
+
+            // Fist: Semua jari menutup (di bawah pergelangan)
+            if (thumb.y > wrist.y && index.y > wrist.y &&
+                middle.y > wrist.y && ring.y > wrist.y && pinky.y > wrist.y) {
+                return "Fist!";
+            }
+
+            return null; // Tidak ada gesture yang cocok
+        }
+
+        // Inisialisasi MediaPipe Hands
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        hands.onResults(onResults);
+
+        // Fungsi untuk menangani hasil deteksi
+        function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
+                drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
+
+                // Hitung posisi rata-rata tangan
+                const currentPosition = {
+                    x: (landmarks[0].x + landmarks[9].x) / 2,
+                    y: (landmarks[0].y + landmarks[9].y) / 2
+                };
+
+                // Deteksi gerakan untuk suara
+                if (lastHandPosition) {
+                    const distance = Math.sqrt(
+                        Math.pow(currentPosition.x - lastHandPosition.x, 2) +
+                        Math.pow(currentPosition.y - lastHandPosition.y, 2)
+                    );
+                    if (distance > 0.05) {
+                        soundElement.play();
+                    }
+                }
+                lastHandPosition = currentPosition;
+
+                // Deteksi gesture dan tampilkan teks
+                const gesture = detectGesture(landmarks);
+                if (gesture && gesture !== lastGesture) {
+                    gestureText.textContent = gesture;
+                    lastGesture = gesture;
+                }
+            } else {
+                lastHandPosition = null;
+                lastGesture = null;
+                gestureText.textContent = ""; // Hapus teks jika tangan hilang
+            }
+
+            canvasCtx.restore();
+        }
+
+        // Akses kamera
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        camera.start();
+    </script>
+</body>
+</html>
